@@ -8,6 +8,16 @@ from models import setup_db, Question, Category
 
 QUESTIONS_PER_PAGE = 10
 
+
+def paginate_questions(request, Choice):
+    page = request.args.get("page", 1, type=int)
+    start = (page - 1) * QUESTIONS_PER_PAGE
+    end = start + QUESTIONS_PER_PAGE
+    questions = [question.format() for question in Choice]
+    pg_que = questions[start:end]
+    return pg_que
+
+
 def create_app(test_config=None):
     # create and configure the app
     app = Flask(__name__)
@@ -16,10 +26,24 @@ def create_app(test_config=None):
     """
     @TODO: Set up CORS. Allow '*' for origins. Delete the sample route after completing the TODOs
     """
+    res = {r"/*": {"origins": "*"}}
+    CORS(app, resources=res)
 
     """
     @TODO: Use the after_request decorator to set Access-Control-Allow
     """
+
+    @app.after_request
+    def after_request(response):
+        response.headers.add(
+            "Access-Control-Allow-Headers", "Content-Type,Authorization,true"
+        )
+        response.headers.add(
+            "Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS"
+        )
+        response.headers.add("Access-Control-Allow-Credentials", "true")
+
+        return response
 
     """
     @TODO:
@@ -27,6 +51,20 @@ def create_app(test_config=None):
     for all available categories.
     """
 
+    @app.get("/categories")
+    def available_categories():
+        try:
+            AllCategories = Category.query.all()
+            if AllCategories is None:
+                abort(404)
+
+            listALl = {}
+            for category in AllCategories:
+                listALl[category.id] = category.type
+            return {"success": True, "categories": listALl}
+
+        except:
+            abort(404)
 
     """
     @TODO:
@@ -34,12 +72,43 @@ def create_app(test_config=None):
     including pagination (every 10 questions).
     This endpoint should return a list of questions,
     number of total questions, current category, categories.
+    
 
     TEST: At this point, when you start the application
     you should see questions and categories generated,
     ten questions per page and pagination at the bottom of the screen for three pages.
     Clicking on the page numbers should update the questions.
     """
+
+    @app.get("/questions")
+    def get_question():
+        try:
+
+            all_questions = Question.query.order_by(Question.id).all()
+            total_questions = len(all_questions)
+            pg_que = paginate_questions(request, all_questions)
+
+            if len(pg_que) == 0:
+                abort(404)
+
+            AllCategories = Category.query.all()
+            if AllCategories is None:
+                abort(404)
+
+            listALl = {}
+            for category in AllCategories:
+                listALl[category.id] = category.type
+            return {
+                "success": True,
+                "questions": pg_que,
+                "total_questions": total_questions,
+                "categories": listALl,
+                "current_category": None,
+            }
+
+        except Exception as E:
+            print(E)
+            abort(404)
 
     """
     @TODO:
@@ -48,6 +117,25 @@ def create_app(test_config=None):
     TEST: When you click the trash icon next to a question, the question will be removed.
     This removal will persist in the database and when you refresh the page.
     """
+
+    @app.delete("/questions/<int:id>")
+    def delete_question(id):
+        try:
+            question = Question.query.filter_by(id=id).first()
+            if question is None:
+                abort(404)
+
+            question.delete()
+            list_question = Question.query.order_by(Question.id).all()
+            pg = paginate_questions(request, list_question)
+
+            return jsonify(
+                {
+                    "success": True,
+                }
+            )
+        except:
+            abort(404)
 
     """
     @TODO:
@@ -60,6 +148,33 @@ def create_app(test_config=None):
     of the questions list in the "List" tab.
     """
 
+    @app.post("/questions")
+    def insert_question():
+        body = request.get_json()
+
+        new_question = body.get("question", None)
+        new_answer = body.get("answer", None)
+        new_category = body.get("category", None)
+        new_difficulty = body.get("difficulty", None)
+
+        # try:
+        record = Question(
+            question=new_question,
+            answer=new_answer,
+            category=new_category,
+            difficulty=new_difficulty,
+        )
+        record.insert()
+        list_question = Question.query.order_by(Question.id).all()
+        pg = paginate_questions(request, list_question)
+        total_questions = len(list_question)
+
+        return jsonify(
+            {
+                "success": True,
+            }
+        )
+
     """
     @TODO:
     Create a POST endpoint to get questions based on a search term.
@@ -71,6 +186,28 @@ def create_app(test_config=None):
     Try using the word "title" to start.
     """
 
+    @app.post("/search")
+    def search_term():
+        body = request.get_json()
+        search = body.get("searchTerm")
+        questions = Question.query.filter(
+            Question.question.ilike("%" + search + "%")
+        ).all()
+
+        if questions:
+            total_queations = len(questions)
+            pg = paginate_questions(request, questions)
+            return jsonify(
+                {
+                    "success": True,
+                    "questions": pg,
+                    "total_questions": total_queations,
+                    "current_category": None,
+                }
+            )
+        else:
+            abort(404)
+
     """
     @TODO:
     Create a GET endpoint to get questions based on category.
@@ -79,6 +216,24 @@ def create_app(test_config=None):
     categories in the left column will cause only questions of that
     category to be shown.
     """
+
+    @app.get("/categories/<int:id>/questions")
+    def get_category(id):
+        get_cate = Category.query.filter_by(id=id).first()
+        if get_cate:
+            questionsInCat = Question.query.filter_by(category=get_cate.id).all()
+            total_queations = len(questionsInCat)
+            pg = paginate_questions(request, questionsInCat)
+            return jsonify(
+                {
+                    "success": True,
+                    "questions": pg,
+                    "total_questions": total_queations,
+                    "current_category": get_cate.type,
+                }
+            )
+        else:
+            abort(404)
 
     """
     @TODO:
@@ -92,11 +247,43 @@ def create_app(test_config=None):
     and shown whether they were correct or not.
     """
 
+    @app.post("/quizzes")
+    def quiz():
+        body = request.get_json()
+        quizCategory = body.get("quiz_category")
+        previousQuestion = body.get("previous_question")
+        quiz_by_category = (
+            Question.query.all()
+            if quizCategory.get("id") == 0
+            else Question.query.filter_by(category=quizCategory.get("id")).all()
+        )
+
+        random_index = random.randint(0, len(quizCategory) - 1)
+        question = None
+        if quiz_by_category:
+            question = quiz_by_category[random_index]
+        return {"question": question.format()}
+
     """
     @TODO:
     Create error handlers for all expected errors
     including 404 and 422.
     """
 
-    return app
+    @app.errorhandler(404)
+    def not_for_found(error):
+        return (
+            jsonify(
+                {"success": False, "error": 404, "message": "Page or Data Not Found"}
+            ),
+            404,
+        )
 
+    @app.errorhandler(422)
+    def unprocessable(error):
+        return (
+            jsonify({"success": False, "error": 422, "message": "unprocessable"}),
+            422,
+        )
+
+    return app
